@@ -4,3 +4,4 @@ Future.md
 *.log
 .vscode/
 settings.local.json
+test-results.xml

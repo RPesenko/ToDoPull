@@ -1,0 +1,87 @@
+name: Validate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: PowerShell validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+
+      - name: Install PowerShell dependencies
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -Scope CurrentUser -Force -AllowClobber -MinimumVersion 5.7.1 -MaximumVersion 5.7.1
+          Install-Module Microsoft.Graph.Authentication -Scope CurrentUser -Force -AllowClobber
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $configuration = New-PesterConfiguration
+          $configuration.Run.Path = './tests'
+          $configuration.Run.PassThru = $true
+          $configuration.Output.Verbosity = 'Detailed'
+          $configuration.TestResult.Enabled = $true
+          $configuration.TestResult.OutputFormat = 'JUnitXml'
+          $configuration.TestResult.OutputPath = './test-results.xml'
+
+          $result = Invoke-Pester -Configuration $configuration
+          if ($result.FailedCount -gt 0) {
+              exit 1
+          }
+
+      - name: Validate PowerShell syntax and documentation
+        shell: pwsh
+        run: |
+          $parseFailures = [System.Collections.Generic.List[string]]::new()
+
+          Get-ChildItem -Path . -Filter '*.ps1' -Recurse -File | ForEach-Object {
+              $tokens = $null
+              $errors = $null
+              $null = [System.Management.Automation.Language.Parser]::ParseFile(
+                  $_.FullName,
+                  [ref]$tokens,
+                  [ref]$errors
+              )
+
+              foreach ($error in $errors) {
+                  $parseFailures.Add("$($_.FullName): $($error.Message) (line $($error.Extent.StartLineNumber))")
+              }
+          }
+
+          if (-not (Test-Path -LiteralPath './README.md' -PathType Leaf)) {
+              $parseFailures.Add('README.md is missing.')
+          }
+
+          if ($parseFailures.Count -gt 0) {
+              $parseFailures | ForEach-Object { Write-Error $_ }
+              exit 1
+          }
+
+          Write-Host 'PowerShell syntax and required documentation validation passed.'
+
+      - name: Upload Pester test results
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f699f01bdf61f4b5b7aee5b1 # v4.6.2
+        with:
+          name: pester-test-results
+          if-no-files-found: warn
+          path: test-results.xml
