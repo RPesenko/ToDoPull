@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0] - 2026-11-21
+
+### Added
+- Added an optional `-Markdown` switch that writes a `.md` export alongside the JSON export.
+- Added Markdown task checkboxes, list headings, due dates, categories, descriptions, and failed-list reporting.
+- Added Pester coverage for Markdown rendering, Unicode, multiline descriptions, escaped punctuation, Graph pagination, and Hashtable values.
+- Added GitHub Actions validation for pull requests and pushes to `main`.
+
+### Changed
+- Normalized Hashtable task fields, including due dates and body content, before rendering JSON or Markdown.
+- Updated task and log timestamps to local 12-hour time with `AM`/`PM` and available timezone abbreviations.
+- Preserved explicit UTC labels for UTC timestamps.
+- Aligned multiline Markdown descriptions beneath the description text.
+
 ## [0.3.0] - 2026-11-21
 
 ### Added
