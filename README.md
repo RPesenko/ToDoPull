@@ -97,6 +97,17 @@ The top-level metadata includes script and Graph API versions, export time, list
 2026-01-15 12:30:03 - Export complete: 1 active, 0 completed, 0 failed list(s).
 ```
 
+## Tests
+
+Run the offline Pester test suite from the repository root:
+
+```powershell
+Install-Module Pester -Scope CurrentUser -MinimumVersion 5.0
+Invoke-Pester -Path ./tests
+```
+
+The tests mock Microsoft Graph and do not require Microsoft account credentials.
+
 ## License
 
 This project is distributed under the MIT License; see [LICENSE](LICENSE).
