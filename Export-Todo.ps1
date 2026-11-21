@@ -33,7 +33,9 @@ function Invoke-ToDoExport {
             [string]$Message
         )
 
-        $entry = '{0} - {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
+        $zoneCode = Get-LocalTimeZoneCode
+        $zoneSuffix = if ($zoneCode) { ' ' + $zoneCode } else { '' }
+        $entry = '{0}{1} - {2}' -f (Get-Date -Format 'yyyy-MM-dd h:mm:ss tt'), $zoneSuffix, $Message
         Add-Content -LiteralPath $LogFile -Value $entry -Encoding utf8
         Write-Host $entry
     }
@@ -139,8 +141,31 @@ function Invoke-ToDoExport {
                 if ($null -ne $contentProperty) {
                     $normalizedBody = [string]$contentProperty.Value
                 }
+                elseif ($Task.body -is [hashtable] -and $Task.body.ContainsKey('content')) {
+                    $normalizedBody = [string]$Task.body['content']
+                }
                 else {
                     $normalizedBody = [string]$Task.body
+                }
+            }
+        }
+
+        $normalizedDueDateTime = $null
+        $dueTimeZone = $null
+        if ($null -ne $Task.dueDateTime) {
+            if ($Task.dueDateTime -is [string]) {
+                $normalizedDueDateTime = [string]$Task.dueDateTime
+            }
+            elseif ($Task.dueDateTime.PSObject.Properties['dateTime']) {
+                $normalizedDueDateTime = [string]$Task.dueDateTime.PSObject.Properties['dateTime'].Value
+                if ($Task.dueDateTime.PSObject.Properties['timeZone']) {
+                    $dueTimeZone = [string]$Task.dueDateTime.PSObject.Properties['timeZone'].Value
+                }
+            }
+            elseif ($Task.dueDateTime -is [hashtable] -and $Task.dueDateTime.ContainsKey('dateTime')) {
+                $normalizedDueDateTime = [string]$Task.dueDateTime['dateTime']
+                if ($Task.dueDateTime.ContainsKey('timeZone')) {
+                    $dueTimeZone = [string]$Task.dueDateTime['timeZone']
                 }
             }
         }
@@ -150,10 +175,10 @@ function Invoke-ToDoExport {
             title                = $Task.title
             status               = $Task.status
             importance           = $Task.importance
-            createdDateTime      = $Task.createdDateTime
-            lastModifiedDateTime = $Task.lastModifiedDateTime
-            dueDateTime          = $Task.dueDateTime
-            completedDateTime    = $Task.completedDateTime
+            createdDateTime      = ConvertTo-DisplayTime -Value $Task.createdDateTime -SourceTimeZone 'UTC'
+            lastModifiedDateTime = ConvertTo-DisplayTime -Value $Task.lastModifiedDateTime -SourceTimeZone 'UTC'
+            dueDateTime          = ConvertTo-DisplayTime -Value $normalizedDueDateTime -SourceTimeZone $dueTimeZone
+            completedDateTime    = ConvertTo-DisplayTime -Value $Task.completedDateTime -SourceTimeZone 'UTC'
             categories           = @($Task.categories)
             body                 = $normalizedBody
             hasAttachments       = $Task.hasAttachments
@@ -162,7 +187,10 @@ function Invoke-ToDoExport {
     }
 
     function ConvertTo-MarkdownText {
-        param([AllowNull()][string]$Text)
+        param(
+            [AllowNull()][string]$Text,
+            [string]$ContinuationIndent = ''
+        )
 
         if ($null -eq $Text) {
             return ''
@@ -173,7 +201,12 @@ function Invoke-ToDoExport {
             $escaped = $escaped.Replace($character, '\' + $character)
         }
 
-        return $escaped.Replace("`r`n", '  ' + [Environment]::NewLine).Replace("`n", '  ' + [Environment]::NewLine).Replace("`r", '  ' + [Environment]::NewLine)
+        $escaped = $escaped.Replace("`r`n", "`n").Replace("`r", "`n")
+        if ($ContinuationIndent) {
+            $escaped = $escaped.Replace("`n", [Environment]::NewLine + $ContinuationIndent)
+        }
+
+        return $escaped
     }
 
     function ConvertTo-MarkdownDocument {
@@ -182,7 +215,7 @@ function Invoke-ToDoExport {
         $lines = [System.Collections.Generic.List[string]]::new()
         $lines.Add('# Microsoft To Do Export')
         $lines.Add('')
-        $lines.Add("- Exported: $($ExportData.exportTimestamp)")
+        $lines.Add("- Exported: $(ConvertTo-DisplayTime -Value $ExportData.exportTimestamp -SourceTimeZone 'UTC')")
         $lines.Add("- Active tasks: $($ExportData.activeTaskCount)")
         $lines.Add("- Completed tasks: $($ExportData.completedTaskCount)")
         $lines.Add("- Failed lists: $($ExportData.summary.failedListCount)")
@@ -203,14 +236,15 @@ function Invoke-ToDoExport {
                 $lines.Add("- $checkbox $(ConvertTo-MarkdownText -Text ([string]$task.title))")
 
                 if ($task.dueDateTime) {
-                    $lines.Add("  - Due: $($task.dueDateTime)")
+                    $dueText = ConvertTo-MarkdownText -Text ([string]$task.dueDateTime)
+                    $lines.Add("  - Due: $dueText")
                 }
                 if ($task.categories.Count -gt 0) {
                     $categoryText = ($task.categories | ForEach-Object { ConvertTo-MarkdownText -Text ([string]$_) }) -join ', '
                     $lines.Add("  - Categories: $categoryText")
                 }
                 if ($task.body) {
-                    $bodyText = ConvertTo-MarkdownText -Text ([string]$task.body)
+                    $bodyText = ConvertTo-MarkdownText -Text ([string]$task.body) -ContinuationIndent '                 '
                     $lines.Add("  - Description: $bodyText")
                 }
             }
@@ -390,6 +424,83 @@ function Invoke-ToDoExport {
         MarkdownFile = $markdownFile
     }
 }
+
+function Get-LocalTimeZoneCode {
+        param([AllowNull()][DateTime]$Date)
+
+        $zone = [TimeZoneInfo]::Local
+        if ($zone.Id -eq 'UTC' -or $zone.Id -eq 'Etc/UTC') {
+            return 'UTC'
+        }
+
+        $referenceDate = if ($null -ne $Date) { [DateTime]::SpecifyKind($Date, [DateTimeKind]::Unspecified) } else { [DateTime]::Now }
+        $daylight = $zone.IsDaylightSavingTime($referenceDate)
+        $id = $zone.Id.ToLowerInvariant()
+        $name = $zone.DisplayName.ToLowerInvariant()
+
+        $codes = if ($daylight) {
+            @{ 'eastern' = 'EDT'; 'central' = 'CDT'; 'mountain' = 'MDT'; 'pacific' = 'PDT'; 'alaskan' = 'AKDT'; 'hawaiian' = 'HST' }
+        }
+        else {
+            @{ 'eastern' = 'EST'; 'central' = 'CST'; 'mountain' = 'MST'; 'pacific' = 'PST'; 'alaskan' = 'AKST'; 'hawaiian' = 'HST' }
+        }
+
+        foreach ($key in $codes.Keys) {
+            if ($id.Contains($key) -or $name.Contains($key)) {
+                return $codes[$key]
+            }
+        }
+
+        return $null
+    }
+
+    function ConvertTo-DisplayTime {
+        param(
+            [AllowNull()][object]$Value,
+            [string]$SourceTimeZone
+        )
+
+        if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+            return $null
+        }
+
+        $text = [string]$Value
+
+        try {
+            $offsetDate = [DateTimeOffset]::Parse($text, [Globalization.CultureInfo]::InvariantCulture)
+            $hasExplicitOffset = $text.TrimEnd().EndsWith('Z', [StringComparison]::OrdinalIgnoreCase) -or $text -match '[+-]\d{2}:?\d{2}$'
+            if ($hasExplicitOffset) {
+                if ($offsetDate.Offset -eq [TimeSpan]::Zero) {
+                    return $offsetDate.UtcDateTime.ToString('yyyy-MM-dd h:mm:ss tt', [Globalization.CultureInfo]::InvariantCulture) + ' UTC'
+                }
+
+                $localDate = [TimeZoneInfo]::ConvertTime($offsetDate, [TimeZoneInfo]::Local).DateTime
+                $zoneCode = Get-LocalTimeZoneCode -Date $localDate
+                $suffix = if ($zoneCode) { ' ' + $zoneCode } else { '' }
+                return $localDate.ToString('yyyy-MM-dd h:mm:ss tt', [Globalization.CultureInfo]::InvariantCulture) + $suffix
+            }
+        }
+        catch {
+            # Fall through to DateTime parsing for Graph date strings without offsets.
+        }
+
+        try {
+            $date = [DateTime]::Parse($text, [Globalization.CultureInfo]::InvariantCulture)
+        }
+        catch {
+            return $text
+        }
+
+        $utcSource = [string]::IsNullOrWhiteSpace($SourceTimeZone) -or $SourceTimeZone -match 'UTC|Zulu|GMT'
+        if ($utcSource) {
+            $utcDate = [DateTime]::SpecifyKind($date, [DateTimeKind]::Utc)
+            $date = [TimeZoneInfo]::ConvertTimeFromUtc($utcDate, [TimeZoneInfo]::Local)
+        }
+
+        $zoneCode = Get-LocalTimeZoneCode -Date $date
+        $suffix = if ($zoneCode) { ' ' + $zoneCode } else { '' }
+        return $date.ToString('yyyy-MM-dd h:mm:ss tt', [Globalization.CultureInfo]::InvariantCulture) + $suffix
+    }
 
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-ToDoExport -IncludeCompleted:$IncludeCompleted -Markdown:$Markdown -ScriptRoot $PSScriptRoot

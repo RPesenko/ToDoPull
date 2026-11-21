@@ -222,4 +222,82 @@ Describe 'ToDoPull export behavior' {
         $markdown | Should -Match ([regex]::Escape('\# line'))
         $markdown | Should -Match ([regex]::Escape('\| line'))
     }
+
+    It 'renders Hashtable due-date and body values as scalar Markdown values' {
+        Mock Invoke-MgGraphRequest {
+            if ($Uri -match '/me/todo/lists$') {
+                return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'list-1'; displayName = 'Household workings' }); '@odata.nextLink' = $null }
+            }
+            return [pscustomobject]@{
+                value = @([pscustomobject]@{
+                    id = 'task-1'
+                    title = 'Renew subscription'
+                    status = 'notStarted'
+                    importance = 'normal'
+                    createdDateTime = '2026-11-21T12:00:00Z'
+                    lastModifiedDateTime = '2026-11-21T12:30:00Z'
+                    dueDateTime = @{ dateTime = '2026-11-22T06:00:00Z'; timeZone = 'UTC' }
+                    completedDateTime = $null
+                    categories = @()
+                    body = @{ content = 'Renew before the deadline' }
+                    hasAttachments = $false
+                    isReminderOn = $false
+                })
+                '@odata.nextLink' = $null
+            }
+        }
+
+        $result = Invoke-ToDoExport -Markdown -ScriptRoot $testRoot -NoBanner
+
+        $result.Export.lists[0].tasks[0].dueDateTime | Should -Match '2026-11-22'
+        $result.Export.lists[0].tasks[0].dueDateTime | Should -Match 'AM|PM'
+        $result.Export.lists[0].tasks[0].body | Should -Be 'Renew before the deadline'
+
+        $markdown = Get-Content -LiteralPath $result.MarkdownFile -Raw
+        $markdown | Should -Match 'Due:'
+        $markdown | Should -Match 'AM|PM'
+        $markdown | Should -Match 'Description: Renew before the deadline'
+        $markdown | Should -Not -Match 'System\.Collections\.Hashtable'
+    }
+
+    It 'formats explicit UTC timestamps and appends AM or PM to local task times' {
+        $utcText = ConvertTo-DisplayTime -Value '2026-11-21T12:00:00Z' -SourceTimeZone 'UTC'
+        $utcText | Should -Match 'UTC'
+        $utcText | Should -Match 'AM|PM'
+
+        $localText = ConvertTo-DisplayTime -Value '2026-11-21T12:00:00-05:00' -SourceTimeZone 'EST'
+        $localText | Should -Match 'AM|PM'
+        $localText | Should -Not -Match 'System\.Collections\.Hashtable'
+    }
+
+    It 'indents multiline description continuation lines beneath description text' {
+        Mock Invoke-MgGraphRequest {
+            if ($Uri -match '/me/todo/lists$') {
+                return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'list-1'; displayName = 'Tasks' }); '@odata.nextLink' = $null }
+            }
+            return [pscustomobject]@{
+                value = @([pscustomobject]@{
+                    id = 'task-1'
+                    title = 'Task name'
+                    status = 'notStarted'
+                    importance = 'normal'
+                    createdDateTime = '2026-11-21T12:00:00Z'
+                    lastModifiedDateTime = '2026-11-21T12:30:00Z'
+                    dueDateTime = $null
+                    completedDateTime = $null
+                    categories = @()
+                    body = @{ content = "First body line`nSecond body line" }
+                    hasAttachments = $false
+                    isReminderOn = $false
+                })
+                '@odata.nextLink' = $null
+            }
+        }
+
+        $result = Invoke-ToDoExport -Markdown -ScriptRoot $testRoot -NoBanner
+        $markdown = Get-Content -LiteralPath $result.MarkdownFile -Raw
+
+        $markdown | Should -Match "Description: First body line`r?`n                 Second body line"
+        $markdown | Should -Not -Match "`nSecond body line"
+    }
 }

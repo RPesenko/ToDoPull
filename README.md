@@ -95,6 +95,8 @@ The top-level metadata includes script and Graph API versions, export time, list
 
 `activeTaskCount` and `completedTaskCount` count tasks actually included in the exported lists. If completed tasks are omitted, `summary.skippedCompletedCount` records the number skipped. `listCount` is the number of discovered lists; `summary.failedLists` identifies any lists whose tasks could not be fetched.
 
+Task timestamps returned by Microsoft Graph are formatted for display in local 12-hour time with `AM` or `PM`. Explicit UTC values remain explicitly labeled `UTC`; where a local timezone code is available, it is appended to local values (for example, `EST`, `CST`, `EDT`, or `PDT`). JSON export timestamps remain in UTC when Graph explicitly marks them as UTC.
+
 ## Example console output
 
 ```text
