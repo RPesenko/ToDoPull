@@ -1,0 +1,6 @@
+output/
+logs/
+Future.md
+*.log
+.vscode/
+settings.local.json
