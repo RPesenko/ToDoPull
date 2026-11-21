@@ -32,7 +32,19 @@ Include completed tasks:
 .\Export-Todo.ps1 -IncludeCompleted
 ```
 
-Exports are written to `output/` and run logs to `logs/`, both created beside the script. Graph list/task requests follow pagination. Transient request failures are retried up to three times, and a list that still fails is recorded while processing continues for other lists.
+Also create a readable Markdown export alongside the JSON file:
+
+```powershell
+.\Export-Todo.ps1 -Markdown
+```
+
+Completed tasks can be included in both formats:
+
+```powershell
+.\Export-Todo.ps1 -IncludeCompleted -Markdown
+```
+
+Exports are written to `output/` and run logs to `logs/`, both created beside the script. JSON remains the default output. Markdown output uses checkbox task syntax and is written as a `.md` file with the same timestamp as the JSON export. Graph list/task requests follow pagination. Transient request failures are retried up to three times, and a list that still fails is recorded while processing continues for other lists.
 
 ## Export format
 
@@ -40,7 +52,7 @@ The top-level metadata includes script and Graph API versions, export time, list
 
 ```json
 {
-  "scriptVersion": "0.3.0",
+  "scriptVersion": "0.4.0",
   "exportTimestamp": "2026-01-15T12:30:00.0000000Z",
   "graphApiVersion": "v1.0",
   "listCount": 1,
@@ -86,7 +98,7 @@ The top-level metadata includes script and Graph API versions, export time, list
 ## Example console output
 
 ```text
-2026-01-15 12:30:00 - Starting ToDo export v0.3.0 (IncludeCompleted: False)
+2026-01-15 12:30:00 - Starting ToDo export v0.4.0 (IncludeCompleted: False)
 2026-01-15 12:30:01 - Authentication successful; connected to Microsoft Graph.
 2026-01-15 12:30:02 - List discovery complete: 1 list(s) found.
 2026-01-15 12:30:02 - Processing list: Personal

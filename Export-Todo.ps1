@@ -1,15 +1,18 @@
 [CmdletBinding()]
 param(
     # Include completed tasks in the JSON export. By default only active tasks are exported.
-    [switch]$IncludeCompleted
+    [switch]$IncludeCompleted,
+    # Also render the exported data as a Markdown document.
+    [switch]$Markdown
 )
 
-$ScriptVersion = '0.3.0'
+$ScriptVersion = '0.4.0'
 $GraphApiVersion = 'v1.0'
 
 function Invoke-ToDoExport {
     param(
         [switch]$IncludeCompleted,
+        [switch]$Markdown,
         [string]$ScriptRoot = $PSScriptRoot,
         [switch]$NoBanner
     )
@@ -126,6 +129,22 @@ function Invoke-ToDoExport {
             $Task
         )
 
+        $normalizedBody = $null
+        if ($null -ne $Task.body) {
+            if ($Task.body -is [string]) {
+                $normalizedBody = [string]$Task.body
+            }
+            else {
+                $contentProperty = $Task.body.PSObject.Properties['content']
+                if ($null -ne $contentProperty) {
+                    $normalizedBody = [string]$contentProperty.Value
+                }
+                else {
+                    $normalizedBody = [string]$Task.body
+                }
+            }
+        }
+
         return [ordered]@{
             id                   = $Task.id
             title                = $Task.title
@@ -136,10 +155,78 @@ function Invoke-ToDoExport {
             dueDateTime          = $Task.dueDateTime
             completedDateTime    = $Task.completedDateTime
             categories           = @($Task.categories)
-            body                 = $Task.body.content
+            body                 = $normalizedBody
             hasAttachments       = $Task.hasAttachments
             isReminderOn         = $Task.isReminderOn
         }
+    }
+
+    function ConvertTo-MarkdownText {
+        param([AllowNull()][string]$Text)
+
+        if ($null -eq $Text) {
+            return ''
+        }
+
+        $escaped = $Text.Replace('\', '\\')
+        foreach ($character in @('`', '*', '_', '{', '}', '[', ']', '(', ')', '<', '>', '#', '+', '-', '.', '!', '|')) {
+            $escaped = $escaped.Replace($character, '\' + $character)
+        }
+
+        return $escaped.Replace("`r`n", '  ' + [Environment]::NewLine).Replace("`n", '  ' + [Environment]::NewLine).Replace("`r", '  ' + [Environment]::NewLine)
+    }
+
+    function ConvertTo-MarkdownDocument {
+        param([Parameter(Mandatory)]$ExportData)
+
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $lines.Add('# Microsoft To Do Export')
+        $lines.Add('')
+        $lines.Add("- Exported: $($ExportData.exportTimestamp)")
+        $lines.Add("- Active tasks: $($ExportData.activeTaskCount)")
+        $lines.Add("- Completed tasks: $($ExportData.completedTaskCount)")
+        $lines.Add("- Failed lists: $($ExportData.summary.failedListCount)")
+        $lines.Add('')
+
+        foreach ($list in $ExportData.lists) {
+            $lines.Add("## $(ConvertTo-MarkdownText -Text ([string]$list.name))")
+            $lines.Add('')
+
+            if ($list.tasks.Count -eq 0) {
+                $lines.Add('_No tasks._')
+                $lines.Add('')
+                continue
+            }
+
+            foreach ($task in $list.tasks) {
+                $checkbox = if ($task.status -eq 'completed') { '[x]' } else { '[ ]' }
+                $lines.Add("- $checkbox $(ConvertTo-MarkdownText -Text ([string]$task.title))")
+
+                if ($task.dueDateTime) {
+                    $lines.Add("  - Due: $($task.dueDateTime)")
+                }
+                if ($task.categories.Count -gt 0) {
+                    $categoryText = ($task.categories | ForEach-Object { ConvertTo-MarkdownText -Text ([string]$_) }) -join ', '
+                    $lines.Add("  - Categories: $categoryText")
+                }
+                if ($task.body) {
+                    $bodyText = ConvertTo-MarkdownText -Text ([string]$task.body)
+                    $lines.Add("  - Description: $bodyText")
+                }
+            }
+
+            $lines.Add('')
+        }
+
+        if ($ExportData.summary.failedLists.Count -gt 0) {
+            $lines.Add('## Failed Lists')
+            $lines.Add('')
+            foreach ($failedList in $ExportData.summary.failedLists) {
+                $lines.Add("- $(ConvertTo-MarkdownText -Text ([string]$failedList.name))")
+            }
+        }
+
+        return $lines -join [Environment]::NewLine
     }
 
     Write-Log "Starting ToDo export v$ScriptVersion (IncludeCompleted: $([bool]$IncludeCompleted))"
@@ -260,9 +347,17 @@ function Invoke-ToDoExport {
         $export | ConvertTo-Json -Depth 50 | Set-Content -LiteralPath $outputFile -Encoding utf8
         $null = Get-Content -LiteralPath $outputFile -Raw | ConvertFrom-Json -ErrorAction Stop
         Write-Log 'JSON validation successful.'
+
+        $markdownFile = $null
+        if ($Markdown) {
+            $markdownFile = Join-Path $OutputFolder "todo-export-$fileTimestamp.md"
+            $markdownDocument = ConvertTo-MarkdownDocument -ExportData $export
+            Set-Content -LiteralPath $markdownFile -Value $markdownDocument -Encoding utf8
+            Write-Log 'Markdown rendering successful.'
+        }
     }
     catch {
-        Write-Log ("Export writing or JSON validation failed: {0}" -f (Get-GraphErrorDetails -ErrorRecord $_))
+        Write-Log ("Export writing or JSON/Markdown validation failed: {0}" -f (Get-GraphErrorDetails -ErrorRecord $_))
         throw
     }
 
@@ -282,6 +377,9 @@ function Invoke-ToDoExport {
         Write-Host "Failed lists: $($failedLists.Count)"
         Write-Host ("Duration: {0:N2} seconds" -f $durationSeconds)
         Write-Host "Output: $outputFile"
+        if ($MarkdownFile) {
+            Write-Host "Markdown: $MarkdownFile"
+        }
         Write-Host "Log: $LogFile"
         Write-Host '==================================' -ForegroundColor Cyan
     }
@@ -289,9 +387,10 @@ function Invoke-ToDoExport {
     return [pscustomobject]@{
         Export = $export
         OutputFile = $outputFile
+        MarkdownFile = $markdownFile
     }
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    Invoke-ToDoExport -IncludeCompleted:$IncludeCompleted -ScriptRoot $PSScriptRoot
+    Invoke-ToDoExport -IncludeCompleted:$IncludeCompleted -Markdown:$Markdown -ScriptRoot $PSScriptRoot
 }

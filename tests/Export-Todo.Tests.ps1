@@ -8,7 +8,9 @@ BeforeAll {
         param(
             [string]$Id,
             [string]$Title,
-            [string]$Status = 'notStarted'
+            [string]$Status = 'notStarted',
+            [AllowNull()][string]$Body = 'Task body',
+            [string[]]$Categories = @('Work')
         )
 
         [pscustomobject]@{
@@ -20,8 +22,8 @@ BeforeAll {
             lastModifiedDateTime = '2026-11-21T12:30:00Z'
             dueDateTime = $null
             completedDateTime = if ($Status -eq 'completed') { '2026-11-21T12:30:00Z' } else { $null }
-            categories = @('Work')
-            body = [pscustomobject]@{ content = 'Task body' }
+            categories = $Categories
+            body = if ($null -eq $Body) { $null } else { [pscustomobject]@{ content = [string]$Body } }
             hasAttachments = $false
             isReminderOn = $true
         }
@@ -167,5 +169,57 @@ Describe 'ToDoPull export behavior' {
         $result.Export.activeTaskCount | Should -Be 1
         $result.Export.lists.Count | Should -Be 1
         $result.Export.lists[0].name | Should -Be 'Good'
+    }
+
+    It 'does not create Markdown output unless the switch is specified' {
+        Mock Invoke-MgGraphRequest {
+            if ($Uri -match '/me/todo/lists$') {
+                return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'list-1'; displayName = 'Personal' }); '@odata.nextLink' = $null }
+            }
+            return [pscustomobject]@{ value = @((New-TestTask -Id 'task-1' -Title 'Normal')); '@odata.nextLink' = $null }
+        }
+
+        $result = Invoke-ToDoExport -ScriptRoot $testRoot -NoBanner
+
+        $result.MarkdownFile | Should -BeNullOrEmpty
+        Get-ChildItem -LiteralPath (Join-Path $testRoot 'output') -Filter '*.md' | Should -BeNullOrEmpty
+    }
+
+    It 'renders checkbox tasks and escapes Unicode, multiline, and punctuation content' {
+        $title = '*Review [日本語]* & _draft_'
+        $body = "First line`nSecond # line`nThird | line"
+
+        Mock Invoke-MgGraphRequest {
+            if ($Uri -match '/me/todo/lists$') {
+                return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'list-1'; displayName = '日本語リスト' }); '@odata.nextLink' = $null }
+            }
+            return [pscustomobject]@{
+                value = @(
+                    (New-TestTask -Id 'task-active' -Title $title -Body "First line`nSecond # line`nThird | line" -Categories @('Work', '日本語')),
+                    (New-TestTask -Id 'task-done' -Title 'Done' -Status 'completed' -Body $null -Categories @())
+                )
+                '@odata.nextLink' = $null
+            }
+        }
+
+        $result = Invoke-ToDoExport -IncludeCompleted -Markdown -ScriptRoot $testRoot -NoBanner
+
+        $result.MarkdownFile | Should -Not -BeNullOrEmpty
+        Test-Path $result.MarkdownFile | Should -Be $true
+        $result.Export.lists[0].tasks[0].body | Should -Be $body
+
+        $markdown = Get-Content -LiteralPath $result.MarkdownFile -Raw
+        $markdown | Should -Match '## 日本語リスト'
+        $markdown | Should -Match '\- \[ \]'
+        $markdown | Should -Match '\- \[x\]'
+        $markdown | Should -Match '日本語'
+        $markdown | Should -Match 'First line'
+        $markdown | Should -Match 'Second'
+        $markdown | Should -Match 'Third'
+        $markdown | Should -Match ([regex]::Escape('\*Review'))
+        $markdown | Should -Match ([regex]::Escape('\['))
+        $markdown | Should -Match ([regex]::Escape('\_draft\_'))
+        $markdown | Should -Match ([regex]::Escape('\# line'))
+        $markdown | Should -Match ([regex]::Escape('\| line'))
     }
 }
