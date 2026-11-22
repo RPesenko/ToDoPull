@@ -23,13 +23,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install PowerShell dependencies
         shell: pwsh
         run: |
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-          Install-Module Pester -Scope CurrentUser -Force -AllowClobber -MinimumVersion 5.7.1 -MaximumVersion 5.7.1
+          Install-Module Pester -Scope CurrentUser -Force -AllowClobber -MinimumVersion 5.7.1
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force -AllowClobber
           Install-Module Microsoft.Graph.Authentication -Scope CurrentUser -Force -AllowClobber
 
       - name: Run Pester tests
@@ -78,9 +79,21 @@ jobs:
 
           Write-Host 'PowerShell syntax and required documentation validation passed.'
 
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $errors = @(Invoke-ScriptAnalyzer -Path './Export-Todo.ps1' -Severity Error)
+          if ($errors.Count -gt 0) {
+              $errors | Format-Table -AutoSize | Out-String | Write-Host
+              Write-Error "PSScriptAnalyzer found $($errors.Count) error(s)."
+              exit 1
+          }
+
+          Write-Host 'PSScriptAnalyzer found no errors.'
+
       - name: Upload Pester test results
         if: always()
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f699f01bdf61f4b5b7aee5b1 # v4.6.2
+        uses: actions/upload-artifact@v4
         with:
           name: pester-test-results
           if-no-files-found: warn
