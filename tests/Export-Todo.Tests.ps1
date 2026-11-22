@@ -300,4 +300,50 @@ Describe 'ToDoPull export behavior' {
         $markdown | Should -Match "Description: First body line`r?`n                 Second body line"
         $markdown | Should -Not -Match "`nSecond body line"
     }
+
+    It 'exports recurrence and additional task schedule properties' {
+        Mock Invoke-MgGraphRequest {
+            if ($Uri -match '/me/todo/lists$') {
+                return [pscustomobject]@{ value = @([pscustomobject]@{ id = 'list-1'; displayName = 'Recurring tasks' }); '@odata.nextLink' = $null }
+            }
+            return [pscustomobject]@{
+                value = @([pscustomobject]@{
+                    id = 'task-1'
+                    title = 'Monthly review'
+                    status = 'notStarted'
+                    importance = 'normal'
+                    createdDateTime = '2026-11-21T12:00:00Z'
+                    lastModifiedDateTime = '2026-11-21T12:30:00Z'
+                    bodyLastModifiedDateTime = '2026-11-21T12:31:00Z'
+                    startDateTime = @{ dateTime = '2026-11-22T09:00:00Z'; timeZone = 'UTC' }
+                    dueDateTime = @{ dateTime = '2026-11-22T17:00:00Z'; timeZone = 'UTC' }
+                    reminderDateTime = @{ dateTime = '2026-11-22T08:30:00Z'; timeZone = 'UTC' }
+                    completedDateTime = $null
+                    recurrence = @{
+                        pattern = @{ type = 'absoluteMonthly'; interval = 1; dayOfMonth = 22 }
+                        range = @{ type = 'noEnd'; startDate = '2026-11-22'; recurrenceTimeZone = 'UTC' }
+                    }
+                    categories = @('Work')
+                    body = @{ content = 'Review account and renew if needed' }
+                    hasAttachments = $false
+                    isReminderOn = $true
+                })
+                '@odata.nextLink' = $null
+            }
+        }
+
+        $result = Invoke-ToDoExport -Markdown -ScriptRoot $testRoot -NoBanner
+        $task = $result.Export.lists[0].tasks[0]
+
+        $task.recurrence.pattern.type | Should -Be 'absoluteMonthly'
+        $task.recurrence.range.type | Should -Be 'noEnd'
+        $task.startDateTime | Should -Match 'AM|PM'
+        $task.reminderDateTime | Should -Match 'AM|PM'
+        $task.bodyLastModifiedDateTime | Should -Match 'AM|PM'
+
+        $markdown = Get-Content -LiteralPath $result.MarkdownFile -Raw
+        $markdown | Should -Match 'Recurrence:'
+        $markdown | Should -Match 'absoluteMonthly|Every 1 month'
+        $markdown | Should -Match 'Starting 2026-11-22'
+    }
 }

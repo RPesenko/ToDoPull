@@ -6,7 +6,7 @@ param(
     [switch]$Markdown
 )
 
-$ScriptVersion = '0.4.0'
+$ScriptVersion = '0.5.0'
 $GraphApiVersion = 'v1.0'
 
 function Invoke-ToDoExport {
@@ -170,6 +170,71 @@ function Invoke-ToDoExport {
             }
         }
 
+        $normalizedStartDateTime = $null
+        $startTimeZone = $null
+        if ($null -ne $Task.startDateTime) {
+            if ($Task.startDateTime -is [string]) {
+                $normalizedStartDateTime = [string]$Task.startDateTime
+            }
+            elseif ($Task.startDateTime.PSObject.Properties['dateTime']) {
+                $normalizedStartDateTime = [string]$Task.startDateTime.PSObject.Properties['dateTime'].Value
+                if ($Task.startDateTime.PSObject.Properties['timeZone']) {
+                    $startTimeZone = [string]$Task.startDateTime.PSObject.Properties['timeZone'].Value
+                }
+            }
+            elseif ($Task.startDateTime -is [hashtable] -and $Task.startDateTime.ContainsKey('dateTime')) {
+                $normalizedStartDateTime = [string]$Task.startDateTime['dateTime']
+                if ($Task.startDateTime.ContainsKey('timeZone')) {
+                    $startTimeZone = [string]$Task.startDateTime['timeZone']
+                }
+            }
+        }
+
+        $normalizedReminderDateTime = $null
+        $reminderTimeZone = $null
+        if ($null -ne $Task.reminderDateTime) {
+            if ($Task.reminderDateTime -is [string]) {
+                $normalizedReminderDateTime = [string]$Task.reminderDateTime
+            }
+            elseif ($Task.reminderDateTime.PSObject.Properties['dateTime']) {
+                $normalizedReminderDateTime = [string]$Task.reminderDateTime.PSObject.Properties['dateTime'].Value
+                if ($Task.reminderDateTime.PSObject.Properties['timeZone']) {
+                    $reminderTimeZone = [string]$Task.reminderDateTime.PSObject.Properties['timeZone'].Value
+                }
+            }
+            elseif ($Task.reminderDateTime -is [hashtable] -and $Task.reminderDateTime.ContainsKey('dateTime')) {
+                $normalizedReminderDateTime = [string]$Task.reminderDateTime['dateTime']
+                if ($Task.reminderDateTime.ContainsKey('timeZone')) {
+                    $reminderTimeZone = [string]$Task.reminderDateTime['timeZone']
+                }
+            }
+        }
+
+        $normalizedRecurrence = $null
+        if ($null -ne $Task.recurrence) {
+            $pattern = $null
+            $range = $null
+
+            if ($Task.recurrence.PSObject.Properties['pattern']) {
+                $pattern = $Task.recurrence.PSObject.Properties['pattern'].Value
+            }
+            elseif ($Task.recurrence -is [hashtable] -and $Task.recurrence.ContainsKey('pattern')) {
+                $pattern = $Task.recurrence['pattern']
+            }
+
+            if ($Task.recurrence.PSObject.Properties['range']) {
+                $range = $Task.recurrence.PSObject.Properties['range'].Value
+            }
+            elseif ($Task.recurrence -is [hashtable] -and $Task.recurrence.ContainsKey('range')) {
+                $range = $Task.recurrence['range']
+            }
+
+            $normalizedRecurrence = [ordered]@{
+                pattern = if ($null -ne $pattern) { $pattern } else { $null }
+                range   = if ($null -ne $range) { $range } else { $null }
+            }
+        }
+
         return [ordered]@{
             id                   = $Task.id
             title                = $Task.title
@@ -179,6 +244,10 @@ function Invoke-ToDoExport {
             lastModifiedDateTime = ConvertTo-DisplayTime -Value $Task.lastModifiedDateTime -SourceTimeZone 'UTC'
             dueDateTime          = ConvertTo-DisplayTime -Value $normalizedDueDateTime -SourceTimeZone $dueTimeZone
             completedDateTime    = ConvertTo-DisplayTime -Value $Task.completedDateTime -SourceTimeZone 'UTC'
+            startDateTime        = ConvertTo-DisplayTime -Value $normalizedStartDateTime -SourceTimeZone $startTimeZone
+            reminderDateTime     = ConvertTo-DisplayTime -Value $normalizedReminderDateTime -SourceTimeZone $reminderTimeZone
+            bodyLastModifiedDateTime = ConvertTo-DisplayTime -Value $Task.bodyLastModifiedDateTime -SourceTimeZone 'UTC'
+            recurrence           = $normalizedRecurrence
             categories           = @($Task.categories)
             body                 = $normalizedBody
             hasAttachments       = $Task.hasAttachments
@@ -246,6 +315,18 @@ function Invoke-ToDoExport {
                 if ($task.body) {
                     $bodyText = ConvertTo-MarkdownText -Text ([string]$task.body) -ContinuationIndent '                 '
                     $lines.Add("  - Description: $bodyText")
+                }
+                if ($task.startDateTime) {
+                    $lines.Add("  - Start: $(ConvertTo-MarkdownText -Text ([string]$task.startDateTime))")
+                }
+                if ($task.recurrence) {
+                    $recurrenceText = ConvertTo-RecurrenceText -Recurrence $task.recurrence
+                    if ($recurrenceText) {
+                        $lines.Add("  - Recurrence: $(ConvertTo-MarkdownText -Text $recurrenceText)")
+                    }
+                }
+                if ($task.reminderDateTime) {
+                    $lines.Add("  - Reminder: $(ConvertTo-MarkdownText -Text ([string]$task.reminderDateTime))")
                 }
             }
 
@@ -500,6 +581,45 @@ function Get-LocalTimeZoneCode {
         $zoneCode = Get-LocalTimeZoneCode -Date $date
         $suffix = if ($zoneCode) { ' ' + $zoneCode } else { '' }
         return $date.ToString('yyyy-MM-dd h:mm:ss tt', [Globalization.CultureInfo]::InvariantCulture) + $suffix
+    }
+
+function ConvertTo-RecurrenceText {
+        param([AllowNull()]$Recurrence)
+
+        if ($null -eq $Recurrence) {
+            return $null
+        }
+
+        $pattern = $Recurrence.pattern
+        $range = $Recurrence.range
+        $parts = [System.Collections.Generic.List[string]]::new()
+
+        if ($null -ne $pattern) {
+            $type = [string]$pattern.type
+            $interval = [string]$pattern.interval
+            $patternText = switch ($type) {
+                'daily' { "Every $interval day(s)" }
+                'weekly' { "Every $interval week(s) on $((@($pattern.daysOfWeek) -join ', '))" }
+                'absoluteMonthly' { "Every $interval month(s) on day $($pattern.dayOfMonth)" }
+                'relativeMonthly' { "Every $interval month(s), $($pattern.index) $((@($pattern.daysOfWeek) -join ', '))" }
+                'absoluteYearly' { "Every $interval year(s) on month $($pattern.month), day $($pattern.dayOfMonth)" }
+                'relativeYearly' { "Every $interval year(s), $($pattern.index) $((@($pattern.daysOfWeek) -join ', ')) in month $($pattern.month)" }
+                default { "Type: $type" }
+            }
+            $parts.Add($patternText)
+        }
+
+        if ($null -ne $range) {
+            $rangeText = switch ([string]$range.type) {
+                'endDate' { "until $($range.endDate)" }
+                'numbered' { "for $($range.numberOfOccurrences) occurrence(s)" }
+                'noEnd' { 'with no end date' }
+                default { [string]$range.type }
+            }
+            $parts.Add("Starting $($range.startDate) $rangeText")
+        }
+
+        return ($parts -join '; ')
     }
 
 if ($MyInvocation.InvocationName -ne '.') {

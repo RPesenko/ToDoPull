@@ -52,7 +52,7 @@ The top-level metadata includes script and Graph API versions, export time, list
 
 ```json
 {
-  "scriptVersion": "0.4.0",
+  "scriptVersion": "0.5.0",
   "exportTimestamp": "2026-01-15T12:30:00.0000000Z",
   "graphApiVersion": "v1.0",
   "listCount": 1,
@@ -82,6 +82,10 @@ The top-level metadata includes script and Graph API versions, export time, list
           "lastModifiedDateTime": "2026-01-15T10:00:00Z",
           "dueDateTime": null,
           "completedDateTime": null,
+          "startDateTime": null,
+          "reminderDateTime": null,
+          "bodyLastModifiedDateTime": null,
+          "recurrence": null,
           "categories": [],
           "body": null,
           "hasAttachments": false,
@@ -97,10 +101,63 @@ The top-level metadata includes script and Graph API versions, export time, list
 
 Task timestamps returned by Microsoft Graph are formatted for display in local 12-hour time with `AM` or `PM`. Explicit UTC values remain explicitly labeled `UTC`; where a local timezone code is available, it is appended to local values (for example, `EST`, `CST`, `EDT`, or `PDT`). JSON export timestamps remain in UTC when Graph explicitly marks them as UTC.
 
+Task recurrence is exported through the `recurrence.pattern` and `recurrence.range` objects. Start and reminder timestamps are also exported when present, along with `bodyLastModifiedDateTime`. Markdown output includes readable recurrence and schedule lines when these properties are available.
+
+### Task fields
+
+| Field | Description |
+|---|---|
+| `id` | Microsoft Graph task identifier. |
+| `title` | Task title. |
+| `status` | Task state: `notStarted`, `inProgress`, `completed`, `waitingOnOthers`, or `deferred`. |
+| `importance` | Task importance: `low`, `normal`, or `high`. |
+| `createdDateTime` | Task creation timestamp, displayed in local 12-hour time where applicable. |
+| `lastModifiedDateTime` | Last task modification timestamp. |
+| `dueDateTime` | Due date and time. |
+| `completedDateTime` | Completion timestamp. |
+| `startDateTime` | Scheduled start timestamp, when present. |
+| `reminderDateTime` | Reminder timestamp, when present. |
+| `bodyLastModifiedDateTime` | Last task-body modification timestamp. |
+| `recurrence` | Recurrence pattern and range. `null` for non-recurring tasks. |
+| `categories` | Array of category names. |
+| `body` | Task body text. |
+| `hasAttachments` | Indicates whether Graph reports attachments. |
+| `isReminderOn` | Indicates whether the reminder is enabled. |
+
+A recurring task has a schema similar to:
+
+```json
+{
+  "recurrence": {
+    "pattern": {
+      "type": "absoluteMonthly",
+      "interval": 1,
+      "dayOfMonth": 22,
+      "daysOfWeek": null,
+      "firstDayOfWeek": null,
+      "index": null,
+      "month": null
+    },
+    "range": {
+      "type": "noEnd",
+      "startDate": "2026-11-22",
+      "endDate": null,
+      "numberOfOccurrences": null,
+      "recurrenceTimeZone": "UTC"
+    }
+  },
+  "startDateTime": "2026-11-22 9:00:00 AM UTC",
+  "reminderDateTime": "2026-11-22 8:30:00 AM UTC",
+  "bodyLastModifiedDateTime": "2026-11-21 12:31:00 PM UTC"
+}
+```
+
+The recurrence object follows Microsoft Graph's `patternedRecurrence` shape: `pattern` contains the recurrence frequency and `range` defines the start, end, or number-of-occurrence behavior. Recurrence properties not applicable to a pattern or range may be `null`.
+
 ## Example console output
 
 ```text
-2026-01-15 12:30:00 - Starting ToDo export v0.4.0 (IncludeCompleted: False)
+2026-01-15 12:30:00 - Starting ToDo export v0.5.0 (IncludeCompleted: False)
 2026-01-15 12:30:01 - Authentication successful; connected to Microsoft Graph.
 2026-01-15 12:30:02 - List discovery complete: 1 list(s) found.
 2026-01-15 12:30:02 - Processing list: Personal

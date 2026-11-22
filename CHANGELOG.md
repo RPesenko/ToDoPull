@@ -1,11 +1,19 @@
 # Changelog
 
+## [0.5.0] - 2026-11-21
+
+### Added
+- Exported the Microsoft Graph `recurrence` property, including its pattern and range objects.
+- Exported `startDateTime`, `reminderDateTime`, and `bodyLastModifiedDateTime` task properties.
+- Added readable recurrence and schedule details to Markdown exports.
+- Added Pester coverage for recurrence and additional schedule properties.
+
 ## [0.4.0] - 2026-11-21
 
 ### Added
 - Added an optional `-Markdown` switch that writes a `.md` export alongside the JSON export.
 - Added Markdown task checkboxes, list headings, due dates, categories, descriptions, and failed-list reporting.
-- Added Pester coverage for Markdown rendering, Unicode, multiline descriptions, escaped punctuation, Graph pagination, and Hashtable values.
+- Added Pester coverage for Markdown rendering, Unicode, multiline descriptions, escaped punctuation, Graph pagination, recurrence, and Hashtable values.
 - Added GitHub Actions validation for pull requests and pushes to `main`.
 
 ### Changed
