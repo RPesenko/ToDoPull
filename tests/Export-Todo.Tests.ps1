@@ -344,6 +344,6 @@ Describe 'ToDoPull export behavior' {
         $markdown = Get-Content -LiteralPath $result.MarkdownFile -Raw
         $markdown | Should -Match 'Recurrence:'
         $markdown | Should -Match 'absoluteMonthly|Every 1 month'
-        $markdown | Should -Match 'Starting 2026-11-22'
+        $markdown | Should -Match ([regex]::Escape('Starting 2026\-11\-22'))
     }
 }
